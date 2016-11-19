@@ -43,7 +43,7 @@
 
 ssize_t files_readFileToBufMax(char *fileName, uint8_t * buf, size_t fileMaxSz)
 {
-    int fd = open(fileName, O_RDONLY);
+    int fd = open(fileName, O_RDONLY | O_CLOEXEC);
     if (fd == -1) {
         PLOG_W("Couldn't open '%s' for R/O", fileName);
         return -1;
@@ -335,10 +335,10 @@ bool files_copyFile(const char *source, const char *destination, bool * dstExist
     mode_t dstFilePerms;
 
     // O_EXCL is important for saving unique crashes
-    dstOpenFlags = O_CREAT | O_WRONLY | O_EXCL;
+    dstOpenFlags = O_CREAT | O_WRONLY | O_EXCL | O_CLOEXEC;
     dstFilePerms = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
 
-    inFD = open(source, O_RDONLY);
+    inFD = open(source, O_RDONLY | O_CLOEXEC);
     if (inFD == -1) {
         PLOG_D("Couldn't open '%s' source", source);
         return false;
@@ -443,6 +443,58 @@ bool files_parseBlacklist(honggfuzz_t * hfuzz)
     return true;
 }
 
+/*
+ * Reads symbols from src file (one per line) and append them to filterList. The
+ * total number of added symbols is returned.
+ *
+ * Simple wildcard strings are also supported (e.g. mem*)
+ */
+size_t files_parseSymbolFilter(const char *srcFile, char ***filterList)
+{
+    FILE *f = fopen(srcFile, "rb");
+    if (f == NULL) {
+        PLOG_W("Couldn't open '%s' - R/O mode", srcFile);
+        return 0;
+    }
+    defer {
+        fclose(f);
+    };
+
+    char *lineptr = NULL;
+    defer {
+        free(lineptr);
+    };
+
+    size_t symbolsRead = 0, n = 0;
+    for (;;) {
+        if (getline(&lineptr, &n, f) == -1) {
+            break;
+        }
+
+        if (strlen(lineptr) < 3) {
+            LOG_F("Input symbol '%s' too short (strlen < 3)", lineptr);
+            return 0;
+        }
+
+        if ((*filterList =
+             (char **)util_Realloc(*filterList,
+                                   (symbolsRead + 1) * sizeof((*filterList)[0]))) == NULL) {
+            PLOG_W("realloc failed (sz=%zu)", (symbolsRead + 1) * sizeof((*filterList)[0]));
+            return 0;
+        }
+        (*filterList)[symbolsRead] = malloc(strlen(lineptr));
+        if (!(*filterList)[symbolsRead]) {
+            PLOG_E("malloc(%zu) failed", strlen(lineptr));
+            return 0;
+        }
+        strncpy((*filterList)[symbolsRead], lineptr, strlen(lineptr));
+        symbolsRead++;
+    }
+
+    LOG_I("%zu filter symbols added to list", symbolsRead);
+    return symbolsRead;
+}
+
 uint8_t *files_mapFile(char *fileName, off_t * fileSz, int *fd, bool isWritable)
 {
     int mmapProt = PROT_READ;
@@ -510,11 +562,13 @@ void *files_mapSharedMem(size_t sz, int *fd, const char *dir)
     if (ftruncate(*fd, sz) == -1) {
         PLOG_W("ftruncate(%d, %zu)", *fd, sz);
         close(*fd);
+        *fd = -1;
         return MAP_FAILED;
     }
     void *ret = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, *fd, 0);
     if (ret == MAP_FAILED) {
         PLOG_W("mmap(sz=%zu, fd=%d)", sz, *fd);
+        *fd = -1;
         close(*fd);
         return MAP_FAILED;
     }

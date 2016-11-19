@@ -44,25 +44,25 @@ It should work under the following operating systems:
 ```
 Usage: ./honggfuzz [options] -- path_to_command [args]
 Options:
- --help|-h
+ --help|-h 
 	Help plz..
  --input|-f VALUE
-	Path to the file corpus (file or a directory)
- --nullify_stdio|-q
+	Path to a directory containing initial file corpus
+ --nullify_stdio|-q 
 	Null-ify children's stdin, stdout, stderr; make them quiet
  --timeout|-t VALUE
 	Timeout in seconds (default: '10')
  --threads|-n VALUE
-	Number of concurrent fuzzing threads (default: '2')
- --stdin_input|-s
+	Number of concurrent fuzzing threads (default: number of CPUs / 2)
+ --stdin_input|-s 
 	Provide fuzzing input on STDIN, instead of ___FILE___
  --mutation_rate|-r VALUE
 	Maximal mutation rate in relation to the file size, (default: '0.001')
  --logfile|-l VALUE
 	Log file
- --verbose|-v
+ --verbose|-v 
 	Disable ANSI console; use simple log output
- --verifier|-V
+ --verifier|-V 
 	Enable crashes verifier
  --debug_level|-d VALUE
 	Debug level (0 - FATAL ... 4 - DEBUG), (default: '3' [INFO])
@@ -71,13 +71,15 @@ Options:
  --workspace|-W VALUE
 	Workspace directory to save crashes & runtime files (default: '.')
  --covdir VALUE
-	Output directory for coverage data (default: The same as workspace directory)
+	New coverage is written to a separate directory (default: use the input directory)
  --wordlist|-w VALUE
 	Wordlist file (tokens delimited by NUL-bytes)
  --stackhash_bl|-B VALUE
 	Stackhashes blacklist file (one entry per line)
  --mutate_cmd|-c VALUE
-	External command providing fuzz files, instead of mutating the input corpus
+	External command producing fuzz files (instead of internal mutators)
+ --pprocess_cmd VALUE
+	External command postprocessing files produced by internal mutators
  --iterations|-N VALUE
 	Number of fuzzing iterations (default: '0' [no limit])
  --rlimit_as VALUE
@@ -94,12 +96,16 @@ Options:
 	Save all test-cases (not only the unique ones) by appending the current time-stamp to the filenames
  --sancov|-C 
 	Enable sanitizer coverage feedback
- --instr|-z 
-	Enable compile-time instrumentation (see libraries/instrument_func.c)
+ --instrument|-z 
+	Enable compile-time instrumentation (link with libhfuzz/libhfuzz.a)
  --msan_report_umrs 
 	Report MSAN's UMRS (uninitialized memory access)
  --persistent|-P 
-	Enable persistent fuzzing (link with libraries/persistent.mode.main.o)
+	Enable persistent fuzzing (link with libhfuzz/libhfuzz.a)
+ --linux_symbols_bl VALUE
+	Symbols blacklist filter file (one entry per line)
+ --linux_symbols_wl VALUE
+	Symbols whitelist filter file (one entry per line)
  --linux_pid|-p VALUE
 	Attach to a pid (and its thread group)
  --linux_file_pid VALUE
@@ -119,9 +125,7 @@ Options:
  --linux_perf_bts_edge 
 	Use Intel BTS to count unique edges
  --linux_perf_ipt_block 
-	Use Intel Processor Trace to count unique blocks
- --linux_perf_custom 
-	Custom counter (based on GS register for x86_64)
+	Use Intel Processor Trace to count unique blocks (requires libipt.so)
 
 Examples:
  Run the binary over a mutated file chosen from the directory
@@ -134,16 +138,18 @@ Examples:
   honggfuzz -f input_dir -z -- /usr/bin/tiffinfo -D ___FILE___
  Use persistent mode (libhfuzz/persistent.c):
   honggfuzz -f input_dir -P -- /usr/bin/tiffinfo_persistent
+ Use persistent mode (libhfuzz/persistent.c) and compile-time instrumentation (libhfuzz/instrument.c):
+  honggfuzz -f input_dir -P -z -- /usr/bin/tiffinfo_persistent
  Run the binary over a dynamic file, maximize total no. of instructions:
   honggfuzz --linux_perf_instr -- /usr/bin/tiffinfo -D ___FILE___
  Run the binary over a dynamic file, maximize total no. of branches:
   honggfuzz --linux_perf_branch -- /usr/bin/tiffinfo -D ___FILE___
- Run the binary over a dynamic file, maximize unique code blocks (coverage):
-  honggfuzz --linux_perf_ip -- /usr/bin/tiffinfo -D ___FILE___
- Run the binary over a dynamic file, maximize unique branches (edges):
-  honggfuzz --linux_perf_ip_addr -- /usr/bin/tiffinfo -D ___FILE___
- Run the binary over a dynamic file, maximize custom counters (experimental):
-  honggfuzz --linux_perf_custom -- /usr/bin/tiffinfo -D ___FILE___
+ Run the binary over a dynamic file, maximize unique code blocks via BTS:
+  honggfuzz --linux_perf_bts_block -- /usr/bin/tiffinfo -D ___FILE___
+ Run the binary over a dynamic file, maximize unique branches (edges) via BTS:
+  honggfuzz --linux_perf_bts_edge -- /usr/bin/tiffinfo -D ___FILE___
+ Run the binary over a dynamic file, maximize unique code blocks via Intel Processor Trace (requires libipt.so):
+  honggfuzz --linux_perf_ipt_block -- /usr/bin/tiffinfo -D ___FILE___
 ```
 
 # OUTPUT FILES #

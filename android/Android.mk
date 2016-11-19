@@ -15,22 +15,39 @@
 
 LOCAL_PATH := $(abspath $(call my-dir)/..)
 
+# Force a clean if target API has changed and a previous build exists
+CLEAN_RUN := false
+ifneq ("$(wildcard $(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/android_api.txt)","")
+  CACHED_API := $(shell cat "$(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/android_api.txt")
+  ifneq ($(APP_PLATFORM),$(CACHED_API))
+    $(info [!] Previous build was targeting different API level - cleaning)
+    CLEAN_RUN := $(shell make clean &>/dev/null && echo true || echo false)
+  endif
+endif
+
+# Force a clean if selected toolchain has changed and a previous build exists
+ifeq ($(CLEAN_RUN),false)
+  ifneq ("$(wildcard $(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/ndk_toolchain.txt)","")
+    CACHED_TOOLCHAIN := $(shell cat "$(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/ndk_toolchain.txt")
+    ifneq ($(NDK_TOOLCHAIN),$(CACHED_TOOLCHAIN))
+      $(info [!] Previous build was using different toolchain - cleaning)
+      CLEAN_RUN := $(shell make clean &>/dev/null && echo true || echo false)
+    endif
+  endif
+endif
+
 # Enable Linux ptrace() instead of POSIX signal interface by default
 ANDROID_WITH_PTRACE ?= true
 
 ifeq ($(ANDROID_WITH_PTRACE),true)
   ifeq ($(APP_ABI),$(filter $(APP_ABI),armeabi armeabi-v7a))
     ARCH_ABI := arm
-    UNW_ARCH := arm
   else ifeq ($(APP_ABI),$(filter $(APP_ABI),x86))
     ARCH_ABI := x86
-    UNW_ARCH := x86
   else ifeq ($(APP_ABI),$(filter $(APP_ABI),arm64-v8a))
     ARCH_ABI := arm64
-    UNW_ARCH := aarch64
   else ifeq ($(APP_ABI),$(filter $(APP_ABI),x86_64))
     ARCH_ABI := x86_64
-    UNW_ARCH := x86_64
   else
     $(error Unsuported / Unknown APP_API '$(APP_ABI)')
   endif
@@ -43,9 +60,9 @@ ifeq ($(ANDROID_WITH_PTRACE),true)
   endif
 
   # Upstream libunwind compiled from sources with Android NDK toolchain
-  LIBUNWIND_A := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(UNW_ARCH).a
+  LIBUNWIND_A := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
   ifeq ("$(wildcard $(LIBUNWIND_A))","")
-    $(error libunwind-$(UNW_ARCH) is missing. Please execute \
+    $(error libunwind-$(ARCH_ABI) is missing - to build execute \
             'third_party/android/scripts/compile-libunwind.sh third_party/android/libunwind $(ARCH_ABI)')
   endif
 
@@ -57,7 +74,7 @@ ifeq ($(ANDROID_WITH_PTRACE),true)
 
   include $(CLEAR_VARS)
   LOCAL_MODULE := libunwind-arch
-  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(UNW_ARCH).a
+  LOCAL_SRC_FILES := third_party/android/libunwind/$(ARCH_ABI)/libunwind-$(ARCH_ABI).a
   LOCAL_EXPORT_C_INCLUDES := third_party/android/libunwind/include
   include $(PREBUILT_STATIC_LIBRARY)
 
@@ -75,7 +92,7 @@ ifeq ($(ANDROID_WITH_PTRACE),true)
   # Upstream capstone compiled from sources with Android NDK toolchain
   LIBCAPSTONE_A := third_party/android/capstone/$(ARCH_ABI)/libcapstone.a
   ifeq ("$(wildcard $(LIBCAPSTONE_A))","")
-    $(error libcapstone is missing. Please execute \
+    $(error libcapstone is missing - to build execute \
             'third_party/android/scripts/compile-capstone.sh third_party/android/capstone $(ARCH_ABI)')
   endif
   include $(CLEAR_VARS)
@@ -88,7 +105,7 @@ endif
 ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   LIBBRT_A := third_party/android/libBlocksRuntime/$(ARCH_ABI)/libblocksruntime.a
   ifeq ("$(wildcard $(LIBBRT_A))","")
-    $(error libBlocksRuntime is missing. Please execute \
+    $(error libBlocksRuntime is missing - to build execute \
             'third_party/android/scripts/compile-libBlocksRuntime.sh third_party/android/libBlocksRuntime $(ARCH_ABI)')
   endif
   include $(CLEAR_VARS)
@@ -97,27 +114,9 @@ ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
   include $(PREBUILT_STATIC_LIBRARY)
 endif
 
-# Main honggfuzz module
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := honggfuzz
-LOCAL_SRC_FILES := honggfuzz.c cmdline.c display.c log.c files.c fuzz.c report.c mangle.c util.c sancov.c subproc.c
-LOCAL_CFLAGS := -std=c11 -I. \
-    -D_GNU_SOURCE \
-    -Wall -Wextra -Wno-initializer-overrides -Wno-override-init \
-    -Wno-unknown-warning-option -Werror -funroll-loops -O2 \
-    -Wframe-larger-than=51200
-LOCAL_LDFLAGS := -lm -latomic
-
 ifeq ($(ANDROID_WITH_PTRACE),true)
-  LOCAL_C_INCLUDES := third_party/android/libunwind/include third_party/android/capstone/include
-  LOCAL_STATIC_LIBRARIES := libunwind-arch libunwind libunwind-ptrace libunwind-dwarf-generic libcapstone
-  LOCAL_CFLAGS += -D__HF_USE_CAPSTONE__
   ARCH_SRCS := linux/arch.c linux/ptrace_utils.c linux/perf.c linux/unwind.c linux/pt.c
   ARCH := LINUX
-  ifeq ($(ARCH_ABI),arm)
-    LOCAL_CFLAGS += -DOPENSSL_ARMCAP_ABI='$(OPENSSL_ARMCAP_ABI)'
-  endif
   $(info $(shell (echo "********************************************************************")))
   $(info $(shell (echo "Android PTRACE build: Will prevent debuggerd from processing crashes")))
   $(info $(shell (echo "********************************************************************")))
@@ -129,6 +128,49 @@ else
   $(info $(shell (echo "********************************************************************")))
 endif
 
+COMMON_CFLAGS := -std=c11 -I. \
+  -D_GNU_SOURCE \
+  -Wall -Wextra -Wno-initializer-overrides -Wno-override-init \
+  -Wno-unknown-warning-option -Werror -funroll-loops -O2 \
+  -Wframe-larger-than=51200
+
+# libhfuzz module
+include $(CLEAR_VARS)
+LOCAL_MODULE := hfuzz
+LOCAL_SRC_FILES := $(wildcard libhfuzz/*.c)
+LOCAL_CFLAGS := -D_HF_ARCH_${ARCH} $(COMMON_CFLAGS) \
+	-fPIC -fno-builtin -fno-stack-protector
+
+ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
+  LOCAL_CFLAGS += -fblocks
+  LOCAL_STATIC_LIBRARIES += libblocksruntime
+endif
+
+include $(BUILD_STATIC_LIBRARY)
+
+# Main honggfuzz module
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := honggfuzz
+LOCAL_SRC_FILES := $(wildcard *.c)
+LOCAL_CFLAGS := $(COMMON_CFLAGS)
+LOCAL_LDFLAGS := -lm -latomic
+LOCAL_STATIC_LIBRARIES := libhfuzz
+
+ifeq ($(ANDROID_WITH_PTRACE),true)
+  LOCAL_C_INCLUDES := third_party/android/libunwind/include \
+                      third_party/android/capstone/include
+  LOCAL_STATIC_LIBRARIES += libunwind-arch \
+                            libunwind \
+                            libunwind-ptrace \
+                            libunwind-dwarf-generic \
+                            libcapstone
+  LOCAL_CFLAGS += -D__HF_USE_CAPSTONE__
+  ifeq ($(ARCH_ABI),arm)
+    LOCAL_CFLAGS += -DOPENSSL_ARMCAP_ABI='$(OPENSSL_ARMCAP_ABI)'
+  endif
+endif
+
 LOCAL_SRC_FILES += $(ARCH_SRCS)
 LOCAL_CFLAGS += -D_HF_ARCH_${ARCH}
 
@@ -138,3 +180,15 @@ ifneq (,$(findstring clang,$(NDK_TOOLCHAIN)))
 endif
 
 include $(BUILD_EXECUTABLE)
+
+# The NDK build system does not copy static libraries into project/packages
+# so it has to be done manually in order to have all output under a single path.
+# Also save some build attribute cache files so that cleans can be enforced when
+# required.
+all:POST_BUILD_EVENT
+POST_BUILD_EVENT:
+	@echo $(APP_PLATFORM) > $(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/android_api.txt
+	@echo $(NDK_TOOLCHAIN) > $(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/ndk_toolchain.txt
+	@test -f $(LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a && \
+	  cp $(LOCAL_PATH)/obj/local/$(TARGET_ARCH_ABI)/libhfuzz.a \
+	    $(LOCAL_PATH)/libs/$(TARGET_ARCH_ABI)/libhfuzz.a || true

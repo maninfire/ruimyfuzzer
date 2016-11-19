@@ -50,8 +50,6 @@ static void report_printdynFileMethod(honggfuzz_t * hfuzz)
             dprintf(reportFD, "BLOCK_COUNT ");
         if (hfuzz->dynFileMethod & _HF_DYNFILE_BTS_EDGE)
             dprintf(reportFD, "EDGE_COUNT ");
-        if (hfuzz->dynFileMethod & _HF_DYNFILE_CUSTOM)
-            dprintf(reportFD, "CUSTOM ");
 
         dprintf(reportFD, "\n");
     }
@@ -69,9 +67,11 @@ static void report_printTargetCmd(honggfuzz_t * hfuzz)
 
 void report_Report(honggfuzz_t * hfuzz, char *s)
 {
-    if (s[0] == '\0') {
+    if (s == NULL || s[0] == '\0') {
         return;
     }
+
+    MX_SCOPED_LOCK(&hfuzz->report_mutex);
 
     if (reportFD == -1) {
         char reportFName[PATH_MAX];

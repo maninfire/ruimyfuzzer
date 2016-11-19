@@ -33,7 +33,7 @@
 #define HF_UBSAN_EXIT_CODE  105
 
 /* Prefix for sanitizer report files */
-#define kLOGPREFIX          ".hf.san"
+#define kLOGPREFIX          "HF.sanitizer.log"
 
 /* Bitmap size */
 #define _HF_SANCOV_BITMAP_SIZE 0x3FFFFFF
@@ -42,7 +42,9 @@
 #define _HF_SANCOV_DIR "HF_SANCOV"
 
 extern void sancov_Analyze(honggfuzz_t * hfuzz, fuzzer_t * fuzzer);
+
 extern bool sancov_Init(honggfuzz_t * hfuzz);
+
 extern bool sancov_prepareExecve(honggfuzz_t * hfuzz);
 
 #endif                          /* _HF_SANCOV_H_ */
